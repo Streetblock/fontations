@@ -475,8 +475,18 @@ impl Engine<'_> {
     /// and <https://gitlab.freedesktop.org/freetype/freetype/-/blob/57617782464411201ce7bbc93b086c1b4d7d84a5/src/truetype/ttinterp.c#L4492>
     pub(super) fn op_s45round(&mut self) -> OpResult {
         let n = self.value_stack.pop()?;
-        self.super_round(0x2D41, n);
-        self.graphics.round_state.mode = RoundMode::Super45;
+        let gdi = super::super::research_s45::parameters(n)
+            .filter(|_| crate::gdi_research::enabled("super45"));
+        if let Some((period, phase, threshold)) = gdi {
+            let state = &mut self.graphics.round_state;
+            state.period = period;
+            state.phase = phase;
+            state.threshold = threshold;
+            state.mode = RoundMode::Super45GdiResearch;
+        } else {
+            self.super_round(0x2D41, n);
+            self.graphics.round_state.mode = RoundMode::Super45;
+        }
         Ok(())
     }
 

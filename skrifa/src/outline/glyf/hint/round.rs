@@ -45,6 +45,8 @@ pub enum RoundMode {
     ///
     /// Set by `S45ROUND` instruction.
     Super45,
+    /// Isolated empirical GDI-compatibility research, not upstream behavior.
+    Super45GdiResearch,
 }
 
 /// Graphics state that controls rounding.
@@ -139,6 +141,9 @@ impl RoundState {
                 }
             }
             // <https://gitlab.freedesktop.org/freetype/freetype/-/blob/57617782464411201ce7bbc93b086c1b4d7d84a5/src/truetype/ttinterp.c#L2199>
+            Super45GdiResearch => super::research_s45::round(
+                distance, self.period, self.phase, self.threshold,
+            ),
             Super45 => {
                 if distance >= 0 {
                     let val = distance

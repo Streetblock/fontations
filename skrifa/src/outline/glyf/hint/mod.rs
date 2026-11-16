@@ -12,6 +12,7 @@ mod instance;
 mod math;
 mod program;
 mod projection;
+mod research_s45;
 mod research_line_norm;
 mod research_projection;
 mod research_movement;
