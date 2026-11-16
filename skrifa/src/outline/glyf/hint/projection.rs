@@ -63,7 +63,12 @@ impl GraphicsState<'_> {
                 // <https://gitlab.freedesktop.org/freetype/freetype/-/blob/57617782464411201ce7bbc93b086c1b4d7d84a5/src/truetype/ttinterp.c#L2373>
                 let dx = v1.x - v2.x;
                 let dy = v1.y - v2.y;
-                F26Dot6::from_bits(dot14(
+                let project = if crate::gdi_research::enabled("project-components") {
+                    super::research_projection::dot14
+                } else {
+                    dot14
+                };
+                F26Dot6::from_bits(project(
                     dx.to_bits(),
                     dy.to_bits(),
                     self.proj_vector.x,
@@ -86,7 +91,12 @@ impl GraphicsState<'_> {
                 // https://gitlab.freedesktop.org/freetype/freetype/-/blob/57617782464411201ce7bbc93b086c1b4d7d84a5/src/truetype/ttinterp.c#L2402
                 let dx = v1.x - v2.x;
                 let dy = v1.y - v2.y;
-                F26Dot6::from_bits(dot14(
+                let project = if crate::gdi_research::enabled("project-components") {
+                    super::research_projection::dot14
+                } else {
+                    dot14
+                };
+                F26Dot6::from_bits(project(
                     dx.to_bits(),
                     dy.to_bits(),
                     self.dual_proj_vector.x,
