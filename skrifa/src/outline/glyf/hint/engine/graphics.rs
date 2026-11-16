@@ -83,7 +83,10 @@ impl Engine<'_> {
         let is_parallel = opcode & 1 == 0;
         let p1 = self.graphics.zp1().point(index2)?;
         let p2 = self.graphics.zp2().point(index1)?;
-        let vector = line_vector(p1, p2, is_parallel);
+        let vector = line_vector_gdi(
+            p1, p2, is_parallel,
+            self.graphics.target == super::super::Target::Mono && self.program.initial == Program::Glyph,
+        );
         if opcode < 8 {
             self.graphics.proj_vector = vector;
             self.graphics.dual_proj_vector = vector;
@@ -126,11 +129,17 @@ impl Engine<'_> {
         // First set the dual projection vector from *original* points.
         let p1 = self.graphics.zp1().original(index2)?;
         let p2 = self.graphics.zp2().original(index1)?;
-        self.graphics.dual_proj_vector = line_vector(p1, p2, is_parallel);
+        self.graphics.dual_proj_vector = line_vector_gdi(
+            p1, p2, is_parallel,
+            self.graphics.target == super::super::Target::Mono && self.program.initial == Program::Glyph,
+        );
         // Now set the projection vector from the *current* points.
         let p1 = self.graphics.zp1().point(index2)?;
         let p2 = self.graphics.zp2().point(index1)?;
-        self.graphics.proj_vector = line_vector(p1, p2, is_parallel);
+        self.graphics.proj_vector = line_vector_gdi(
+            p1, p2, is_parallel,
+            self.graphics.target == super::super::Target::Mono && self.program.initial == Program::Glyph,
+        );
         self.graphics.update_projection_state();
         Ok(())
     }
@@ -822,6 +831,23 @@ impl Engine<'_> {
 /// This is common code for the "set vector to line" instructions.
 ///
 /// See <https://gitlab.freedesktop.org/freetype/freetype/-/blob/57617782464411201ce7bbc93b086c1b4d7d84a5/src/truetype/ttinterp.c#L4009>
+fn line_vector_gdi(
+    p1: Point<F26Dot6>,
+    p2: Point<F26Dot6>,
+    is_parallel: bool,
+    mono_glyph: bool,
+) -> Point<i32> {
+    let dx = (p1.x - p2.x).to_bits();
+    let dy = (p1.y - p2.y).to_bits();
+    if mono_glyph && dx != 0 && dy != 0 && crate::gdi_research::enabled("line-vectors") {
+        let (x, y) = if is_parallel { (dx, dy) } else { (dy.wrapping_neg(), dx) };
+        if let Some((x, y)) = super::super::research_line_norm::normalize_nonzero_nearest(x, y) {
+            return Point::new(x, y);
+        }
+    }
+    line_vector(p1, p2, is_parallel)
+}
+
 fn line_vector(p1: Point<F26Dot6>, p2: Point<F26Dot6>, is_parallel: bool) -> Point<i32> {
     let mut a = (p1.x - p2.x).to_bits();
     let mut b = (p1.y - p2.y).to_bits();
