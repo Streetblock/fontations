@@ -111,6 +111,7 @@ extern crate alloc;
 pub extern crate read_fonts as raw;
 
 pub mod font;
+mod gdi_research;
 mod scaler;
 
 #[doc(inline)]

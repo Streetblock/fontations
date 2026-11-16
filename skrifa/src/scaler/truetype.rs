@@ -318,7 +318,31 @@ impl TrueTypeHinter {
         let advance = hdmx_width
             .map(F26Dot6::from_i32)
             .unwrap_or_else(|| loaded.adjusted_advance_width());
-        if !loaded.to_path(PathContourStart::ScanBackward, &mut sink) {
+        // Emit implied points from the original control pair without rounding
+        // away the extra fractional bit needed by the rasterizer.
+        let keep_midpoints = crate::gdi_research::enabled("exact-midpoints");
+        let drawn = if keep_midpoints
+            && loaded.points().iter().all(|p| {
+                p.x.to_bits().unsigned_abs() < (1 << 23)
+                    && p.y.to_bits().unsigned_abs() < (1 << 23)
+            })
+        {
+            let points = loaded
+                .points()
+                .iter()
+                .map(|p| Point::new(p.x.to_f32(), p.y.to_f32()))
+                .collect::<alloc::vec::Vec<_>>();
+            raw::tables::glyf::outline::outline_to_path(
+                &points,
+                loaded.flags(),
+                loaded.contours(),
+                PathContourStart::ScanBackward,
+                &mut sink,
+            )
+        } else {
+            loaded.to_path(PathContourStart::ScanBackward, &mut sink)
+        };
+        if !drawn {
             return Err(Error::Malformed.into());
         }
         let mut metrics = DrawnMetrics::default();
