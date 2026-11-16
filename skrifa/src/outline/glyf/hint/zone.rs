@@ -306,7 +306,10 @@ impl<'a> Zone<'a> {
                         };
                     }
                 } else {
-                    let scale = math::div((cur2 - cur1).to_bits(), orus2 - orus1);
+                    let extent = (cur2 - cur1).to_bits();
+                    let units = orus2 - orus1;
+                    let scale = math::div(extent, units);
+                    let direct = crate::gdi_research::enabled("iup-direct");
                     for ((orig, unscaled), point) in iter {
                         let a = orig.$coord;
                         point.$coord = if a <= org1 {
@@ -314,7 +317,13 @@ impl<'a> Zone<'a> {
                         } else if a >= org2 {
                             a + delta2
                         } else {
-                            cur1 + F26Dot6::from_bits(math::mul(unscaled.$coord - orus1, scale))
+                            let offset = unscaled.$coord - orus1;
+                            let distance = if direct {
+                                math::mul_div(offset, extent, units)
+                            } else {
+                                math::mul(offset, scale)
+                            };
+                            cur1 + F26Dot6::from_bits(distance)
                         };
                     }
                 }
