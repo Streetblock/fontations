@@ -291,6 +291,7 @@ impl TrueTypeHinter {
             .ok_or_else(|| insufficient.clone())?;
         let mut hinter = FontHinter {
             instance: &self.instance,
+            scale_bits: scale.to_bits(),
             tables,
             scratch,
             pedantic: self.pedantic,
@@ -367,6 +368,7 @@ impl TrueTypeHinter {
 /// Owns the per glyph working memory that the zone does not hold.
 struct FontHinter<'a> {
     instance: &'a HintInstance,
+    scale_bits: i32,
     tables: &'a HintTables<'a>,
     scratch: HintScratch<'a>,
     pedantic: bool,
@@ -390,6 +392,26 @@ impl Hinter<F26Dot6> for FontHinter<'_> {
         // are a copy taken on entry. Except for the phantom points: `points`
         // carries them rounded for the interpreter to work on, while the
         // original outline keeps them unrounded, which `phantom` still has.
+        // Test the tie rule for simple static outlines at the active loader's
+        // pre-hint boundary. Do not change metrics or composite transformations.
+        if !zone.is_composite && zone.coords.iter().all(|c| c.to_bits() == 0)
+            && crate::gdi_research::enabled("point-scale-ties")
+        {
+            let real = zone.points.len().saturating_sub(PHANTOM_POINT_COUNT);
+            let round_tie = |value: i32, current: &mut F26Dot6| {
+                let product = i64::from(value) * i64::from(self.scale_bits);
+                if product < 0 && product & 0xffff == 0x8000 {
+                    let up = ((product + 0x8000) >> 16) as i32;
+                    if current.to_bits() == up - 1 {
+                        *current = F26Dot6::from_bits(up);
+                    }
+                }
+            };
+            for (point, raw) in zone.points[..real].iter_mut().zip(zone.unscaled.iter()) {
+                round_tie(raw.x, &mut point.x);
+                round_tie(raw.y, &mut point.y);
+            }
+        }
         let original_scaled = &mut self.scratch.original_scaled[..zone.points.len()];
         original_scaled.copy_from_slice(zone.points);
         let phantom_start = original_scaled.len() - PHANTOM_POINT_COUNT;
