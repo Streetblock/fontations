@@ -310,6 +310,7 @@ impl<'a> Zone<'a> {
                     let units = orus2 - orus1;
                     let scale = math::div(extent, units);
                     let direct = crate::gdi_research::enabled("iup-direct");
+                    let bias_negative = direct && crate::gdi_research::enabled("iup-negative-bias");
                     for ((orig, unscaled), point) in iter {
                         let a = orig.$coord;
                         point.$coord = if a <= org1 {
@@ -319,7 +320,13 @@ impl<'a> Zone<'a> {
                         } else {
                             let offset = unscaled.$coord - orus1;
                             let distance = if direct {
-                                math::mul_div(offset, extent, units)
+                                let numerator = i64::from(offset) * i64::from(extent);
+                                let denominator = i64::from(units);
+                                if bias_negative && numerator < 0 {
+                                    ((numerator + denominator / 2) / denominator) as i32
+                                } else {
+                                    math::mul_div(offset, extent, units)
+                                }
                             } else {
                                 math::mul(offset, scale)
                             };
