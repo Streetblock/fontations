@@ -265,8 +265,15 @@ impl HintInstance {
         // already in 26.6
         // See <https://gitlab.freedesktop.org/freetype/freetype/-/blob/57617782464411201ce7bbc93b086c1b4d7d84a5/src/truetype/ttobjs.c#L996>
         let scale = Fixed::from_bits(scale >> 6);
+        let use_gdi_ties = crate::gdi_research::enabled("cvt-ties");
         for value in &mut self.cvt {
-            *value = (Fixed::from_bits(*value) * scale).to_bits();
+            *value = if use_gdi_ties {
+                // Round exact halves toward positive infinity at CVT setup.
+                let product = i64::from(*value) * i64::from(scale.to_bits());
+                ((product + 0x8000) >> 16) as i32
+            } else {
+                (Fixed::from_bits(*value) * scale).to_bits()
+            };
         }
         self.storage.clear();
         self.storage.resize(tables.max_storage as usize, 0);
