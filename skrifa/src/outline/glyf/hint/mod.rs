@@ -12,6 +12,7 @@ mod instance;
 mod math;
 mod program;
 mod projection;
+mod research_movement;
 mod round;
 mod storage;
 mod value_stack;
