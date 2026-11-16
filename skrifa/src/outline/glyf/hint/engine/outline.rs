@@ -437,7 +437,18 @@ impl Engine<'_> {
             let v1 = gs.zp1().unscaled(p);
             let v2 = gs.zp0().unscaled(gs.rp0);
             let dist = gs.dual_project_unscaled(v1, v2);
-            F26Dot6::from_bits(math::mul(dist, gs.unscaled_to_pixels()))
+            let scale = gs.unscaled_to_pixels();
+            let product = i64::from(dist) * i64::from(scale);
+            let scaled = if gs.target == super::super::Target::Mono
+                && gs.dual_proj_axis != CoordAxis::Both
+                && product < 0 && product & 0xffff == 0x8000
+                && crate::gdi_research::enabled("mdrp-axis-ties")
+            {
+                ((product + 0x8000) >> 16) as i32
+            } else {
+                math::mul(dist, scale)
+            };
+            F26Dot6::from_bits(scaled)
         };
         let cutin = gs.single_width_cutin;
         let value = gs.single_width;
