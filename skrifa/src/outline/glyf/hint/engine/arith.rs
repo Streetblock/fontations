@@ -67,8 +67,21 @@ impl Engine<'_> {
     /// See <https://learn.microsoft.com/en-us/typography/opentype/spec/tt_instructions#multiply>
     /// and <https://gitlab.freedesktop.org/freetype/freetype/-/blob/57617782464411201ce7bbc93b086c1b4d7d84a5/src/truetype/ttinterp.c#L2909>
     pub(super) fn op_mul(&mut self) -> OpResult {
-        self.value_stack
-            .apply_binary(|a, b| Ok(math::mul_div(a, b, 64)))
+        let match_gdi = self.graphics.target == super::super::Target::Mono
+            && crate::gdi_research::enabled("mul-negative-half-ties");
+        self.value_stack.apply_binary(|a, b| {
+            if match_gdi {
+                let product = i64::from(a) * i64::from(b);
+                // For negative half ties, truncating the quotient chooses
+                // the larger integer. Keep the normal overflow handling.
+                if product % 64 == -32 {
+                    if let Ok(rounded) = i32::try_from(product / 64) {
+                        return Ok(rounded);
+                    }
+                }
+            }
+            Ok(math::mul_div(a, b, 64))
+        })
     }
 
     /// ABS[] (0x64)
