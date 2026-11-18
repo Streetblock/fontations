@@ -48,6 +48,8 @@ pub struct GraphicsState<'a> {
     pub freedom_axis: CoordAxis,
     /// Dot product of freedom and projection vectors.
     pub fdotp: i32,
+    /// GDI uses a unit movement factor after SFVTPV, until the vectors are set again.
+    pub sfvtpv_unit_dot: bool,
     /// Determines the manner in which values are rounded.
     ///
     /// See <https://developer.apple.com/fonts/TrueType-Reference-Manual/RM04/Chap4.html#round%20state>
@@ -174,6 +176,7 @@ impl Default for GraphicsState<'_> {
             freedom_vector: vector,
             freedom_axis: CoordAxis::Both,
             fdotp: 0x4000,
+            sfvtpv_unit_dot: false,
             round_state: RoundState::default(),
             rp0: 0,
             rp1: 0,

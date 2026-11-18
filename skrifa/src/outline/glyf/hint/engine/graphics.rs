@@ -108,6 +108,7 @@ impl Engine<'_> {
     pub(super) fn op_sfvtpv(&mut self) -> OpResult {
         self.graphics.freedom_vector = self.graphics.proj_vector;
         self.graphics.update_projection_state();
+        self.graphics.sfvtpv_unit_dot = true;
         Ok(())
     }
 
@@ -989,6 +990,37 @@ mod tests {
             engine.op_sdpvtl(0x87).unwrap();
             assert_eq!(engine.graphics.dual_proj_vector, Point::new(ONE, 0));
         }
+    }
+
+    #[test]
+    fn sdpvtl_recomputes_the_movement_factor_after_sfvtpv() {
+        let mut mock = MockEngine::new();
+        let mut engine = mock.engine();
+        let mut points = [Point::new(0, 0), Point::new(130, 97)].map(|p| p.map(F26Dot6::from_bits));
+        let mut original = points;
+        engine.graphics.zones[1] = Zone {
+            points: &mut points,
+            original: &mut original,
+            unscaled: &mut [],
+            flags: &mut [],
+            contours: &[],
+        };
+        engine.value_stack.push(1).unwrap();
+        engine.op_szps().unwrap();
+        for _ in 0..2 {
+            engine.value_stack.push(1).unwrap();
+            engine.value_stack.push(0).unwrap();
+        }
+
+        engine.op_sdpvtl(0x87).unwrap();
+        engine.op_sfvtpv().unwrap();
+        assert!(engine.graphics.sfvtpv_unit_dot);
+        let vector = engine.graphics.proj_vector;
+
+        engine.op_sdpvtl(0x87).unwrap();
+        assert_eq!(engine.graphics.proj_vector, vector);
+        assert_eq!(engine.graphics.freedom_vector, vector);
+        assert!(!engine.graphics.sfvtpv_unit_dot);
     }
 
     /// Lots of little tests for instructions that just set fields on

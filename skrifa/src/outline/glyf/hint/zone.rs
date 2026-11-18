@@ -443,10 +443,11 @@ impl GraphicsState<'_> {
         // where subpixel rendering provides better fidelity.
         //
         // For more detail, see <https://learn.microsoft.com/en-us/typography/cleartype/truetypecleartype>
-        let gdi_projection = (zone == ZonePointer::Glyph
-            && self.target == super::Target::Mono
-            && crate::gdi_research::enabled("movement-x"))
-            .then_some(self.proj_vector);
+        let mono_glyph = zone == ZonePointer::Glyph && self.target == super::Target::Mono;
+        let gdi_projection =
+            (mono_glyph && crate::gdi_research::enabled("movement-x")).then_some(self.proj_vector);
+        let sfvtpv_unit_dot =
+            mono_glyph && self.sfvtpv_unit_dot && crate::gdi_research::enabled("sfvtpv-unit-dot");
         let back_compat = self.backward_compatibility;
         let back_compat_and_did_iup = back_compat && self.did_iup_x && self.did_iup_y;
         let zone = &mut self.zones[zone as usize];
@@ -474,17 +475,29 @@ impl GraphicsState<'_> {
                 let horizontal = self.proj_vector.y == 0;
                 if fv.x != 0 {
                     if !back_compat || horizontal {
-                        let shift = gdi_projection
-                            .and_then(|p| super::research_movement::x_delta(distance, p.x, p.y, fv.x, fv.y))
-                            .unwrap_or_else(|| math::mul_div(distance, fv.x, self.fdotp));
+                        let shift = if sfvtpv_unit_dot {
+                            super::research_movement::sfvtpv_delta(distance, fv.x)
+                        } else {
+                            gdi_projection
+                                .and_then(|p| {
+                                    super::research_movement::x_delta(
+                                        distance, p.x, p.y, fv.x, fv.y,
+                                    )
+                                })
+                                .unwrap_or_else(|| math::mul_div(distance, fv.x, self.fdotp))
+                        };
                         point.x += F26Dot6::from_bits(shift);
                     }
                     zone.touch(point_ix, CoordAxis::X)?;
                 }
                 if fv.y != 0 {
                     if !back_compat_and_did_iup || horizontal {
-                        zone.point_mut(point_ix)?.y +=
-                            F26Dot6::from_bits(math::mul_div(distance, fv.y, self.fdotp));
+                        let shift = if sfvtpv_unit_dot {
+                            super::research_movement::sfvtpv_delta(distance, fv.y)
+                        } else {
+                            math::mul_div(distance, fv.y, self.fdotp)
+                        };
+                        zone.point_mut(point_ix)?.y += F26Dot6::from_bits(shift);
                     }
                     zone.touch(point_ix, CoordAxis::Y)?;
                 }

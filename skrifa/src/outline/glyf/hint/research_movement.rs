@@ -1,11 +1,18 @@
-//! Isolated X-only movement hypothesis, not a claim about GDI internals.
+//! GDI-compatible arithmetic for monochrome glyph point movement.
 //!
-//! Only move_point's Glyph/Mono/Both X branch calls this module. Distance is
-//! raw F26.6; PV/FV components are normalized raw F2.14. No global cache changes.
-//! None means retain the original X math::mul_div using the original fdotp.
+//! Distances are raw F26.6 and normalized vectors are raw F2.14. When x_delta
+//! returns None, the caller uses the interpreter's normal movement arithmetic.
 
 const ONE: i64 = 16384;
 const MIN_ABS_DOT: i64 = 4096;
+
+/// Round one movement component with the unit factor set by SFVTPV.
+/// Half ties round toward positive infinity on either axis.
+#[inline(always)]
+pub(super) fn sfvtpv_delta(distance: i32, component: i32) -> i32 {
+    let product = i64::from(distance) * i64::from(component);
+    ((product + 8192) >> 14) as i32
+}
 
 #[inline(always)]
 fn local_dot(pvx: i32, pvy: i32, fvx: i32, fvy: i32) -> i64 {
@@ -49,7 +56,17 @@ pub(super) fn x_delta(distance: i32, pvx: i32, pvy: i32, fvx: i32, fvy: i32) -> 
 
 #[cfg(test)]
 mod tests {
-    use super::{from_dot, local_dot, x_delta, ONE};
+    use super::{from_dot, local_dot, sfvtpv_delta, x_delta, ONE};
+
+    #[test]
+    fn sfvtpv_rounds_signed_components_and_negative_half_ties() {
+        assert_eq!(sfvtpv_delta(-44, 13120), -35);
+        assert_eq!(sfvtpv_delta(-44, 9813), -26);
+        assert_eq!(sfvtpv_delta(-9, 11364), -6);
+        assert_eq!(sfvtpv_delta(-9, -11802), 6);
+        assert_eq!(sfvtpv_delta(-3, 8192), -1);
+        assert_eq!(sfvtpv_delta(3, -8192), -1);
+    }
 
     #[test]
     fn local_dot_uses_separate_positive_half_rounding() {

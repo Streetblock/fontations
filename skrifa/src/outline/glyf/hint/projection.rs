@@ -6,6 +6,7 @@ use raw::types::{F26Dot6, Point};
 impl GraphicsState<'_> {
     /// Updates cached state that is derived from projection vectors.
     pub fn update_projection_state(&mut self) {
+        self.sfvtpv_unit_dot = false;
         // 1.0 in 2.14 fixed point.
         const ONE: i32 = 0x4000;
         // Based on Compute_Funcs() at
