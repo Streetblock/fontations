@@ -717,9 +717,17 @@ impl Engine<'_> {
         //
         // See <https://gitlab.freedesktop.org/freetype/freetype/-/blob/57617782464411201ce7bbc93b086c1b4d7d84a5/src/truetype/ttinterp.c#L5986>
         if discriminant.wrapping_abs().wrapping_mul(19) > dotproduct.wrapping_abs() {
-            let v = mul_div(dx, -dby, 0x40).wrapping_add(mul_div(dy, dbx, 0x40));
-            let x = mul_div(v, dax, discriminant);
-            let y = mul_div(v, day, discriminant);
+            let gdi_offset = (gs.target == super::super::Target::Mono
+                && !gs.zp0.is_twilight()
+                && !gs.zp1.is_twilight()
+                && !gs.zp2.is_twilight()
+                && crate::gdi_research::enabled("isect-staged"))
+                .then(|| Self::isect_gdi_offset(dax, day, dbx, dby, dx, dy))
+                .flatten();
+            let (x, y) = gdi_offset.unwrap_or_else(|| {
+                let v = mul_div(dx, -dby, 0x40).wrapping_add(mul_div(dy, dbx, 0x40));
+                (mul_div(v, dax, discriminant), mul_div(v, day, discriminant))
+            });
             let point = gs.zp2_mut().point_mut(point_ix)?;
             point.x = F26Dot6::from_bits(pa0.x.wrapping_add(x));
             point.y = F26Dot6::from_bits(pa0.y.wrapping_add(y));
@@ -742,6 +750,40 @@ impl Engine<'_> {
         }
         gs.zp2_mut().touch(point_ix, CoordAxis::Both)?;
         Ok(())
+    }
+
+    /// Offset along the first line using GDI's staged intersection arithmetic.
+    fn isect_gdi_offset(
+        dax: i32,
+        day: i32,
+        dbx: i32,
+        dby: i32,
+        dx: i32,
+        dy: i32,
+    ) -> Option<(i32, i32)> {
+        use math::mul_div;
+        // Divide by the dominant component of the second line and round
+        // the intermediate quotients before solving for the final offset.
+        let (numerator, denominator) = if dbx.unsigned_abs() >= dby.unsigned_abs() {
+            if dbx == 0 {
+                return None;
+            }
+            (
+                mul_div(dx, dby, dbx).wrapping_sub(dy),
+                mul_div(dax, dby, dbx).wrapping_sub(day),
+            )
+        } else {
+            (
+                dx.wrapping_sub(mul_div(dy, dbx, dby)),
+                dax.wrapping_sub(mul_div(day, dbx, dby)),
+            )
+        };
+        (denominator != 0).then(|| {
+            (
+                mul_div(numerator, dax, denominator),
+                mul_div(numerator, day, denominator),
+            )
+        })
     }
 
     /// Align points.
