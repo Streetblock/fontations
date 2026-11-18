@@ -453,9 +453,11 @@ impl Engine<'_> {
             let scale = gs.unscaled_to_pixels();
             let product = i64::from(dist) * i64::from(scale);
             let scaled = if gs.target == super::super::Target::Mono
-                && gs.dual_proj_axis != CoordAxis::Both
-                && product < 0 && product & 0xffff == 0x8000
+                && product < 0
+                && product & 0xffff == 0x8000
                 && crate::gdi_research::enabled("mdrp-axis-ties")
+                && (gs.dual_proj_axis != CoordAxis::Both
+                    || crate::gdi_research::enabled("mdrp-original-components"))
             {
                 ((product + 0x8000) >> 16) as i32
             } else {
