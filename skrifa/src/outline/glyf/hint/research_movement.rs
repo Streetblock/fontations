@@ -1,7 +1,7 @@
 //! GDI-compatible arithmetic for monochrome glyph point movement.
 //!
-//! Distances are raw F26.6 and normalized vectors are raw F2.14. When x_delta
-//! returns None, the caller uses the interpreter's normal movement arithmetic.
+//! Distances are raw F26.6 and normalized vectors are raw F2.14. When the
+//! checked dot product is unavailable, the caller uses the normal arithmetic.
 
 const ONE: i64 = 16384;
 const MIN_ABS_DOT: i64 = 4096;
@@ -37,7 +37,7 @@ fn from_dot(distance: i32, fvx: i32, k: i64) -> i32 {
 }
 
 #[inline(always)]
-pub(super) fn x_delta(distance: i32, pvx: i32, pvy: i32, fvx: i32, fvy: i32) -> Option<i32> {
+pub(super) fn checked_dot(pvx: i32, pvy: i32, fvx: i32, fvy: i32) -> Option<i32> {
     // The interpreter supplies normalized vectors. Reject out-of-range raw
     // components without abs(i32::MIN); no extra normalization is performed.
     if [pvx, pvy, fvx, fvy]
@@ -51,7 +51,12 @@ pub(super) fn x_delta(distance: i32, pvx: i32, pvy: i32, fvx: i32, fvy: i32) -> 
     if k.abs() < MIN_ABS_DOT {
         return None;
     }
-    Some(from_dot(distance, fvx, k))
+    Some(k as i32)
+}
+
+#[inline(always)]
+pub(super) fn x_delta(distance: i32, pvx: i32, pvy: i32, fvx: i32, fvy: i32) -> Option<i32> {
+    checked_dot(pvx, pvy, fvx, fvy).map(|k| from_dot(distance, fvx, i64::from(k)))
 }
 
 #[cfg(test)]

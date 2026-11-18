@@ -495,7 +495,12 @@ impl GraphicsState<'_> {
                         let shift = if sfvtpv_unit_dot {
                             super::research_movement::sfvtpv_delta(distance, fv.y)
                         } else {
-                            math::mul_div(distance, fv.y, self.fdotp)
+                            let dot = gdi_projection
+                                .and_then(|p| {
+                                    super::research_movement::checked_dot(p.x, p.y, fv.x, fv.y)
+                                })
+                                .unwrap_or(self.fdotp);
+                            math::mul_div(distance, fv.y, dot)
                         };
                         zone.point_mut(point_ix)?.y += F26Dot6::from_bits(shift);
                     }
