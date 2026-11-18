@@ -436,7 +436,20 @@ impl Engine<'_> {
         } else {
             let v1 = gs.zp1().unscaled(p);
             let v2 = gs.zp0().unscaled(gs.rp0);
-            let dist = gs.dual_project_unscaled(v1, v2);
+            let dist = if gs.target == super::super::Target::Mono
+                && gs.dual_proj_axis == CoordAxis::Both
+                && crate::gdi_research::enabled("mdrp-original-components")
+            {
+                // GDI rounds the two projection products before adding them.
+                super::super::research_projection::dot14(
+                    v1.x.wrapping_sub(v2.x),
+                    v1.y.wrapping_sub(v2.y),
+                    gs.dual_proj_vector.x,
+                    gs.dual_proj_vector.y,
+                )
+            } else {
+                gs.dual_project_unscaled(v1, v2)
+            };
             let scale = gs.unscaled_to_pixels();
             let product = i64::from(dist) * i64::from(scale);
             let scaled = if gs.target == super::super::Target::Mono
