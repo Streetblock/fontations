@@ -294,10 +294,16 @@ impl<'a> Zone<'a> {
                             .get_mut(p1..=p2)
                             .ok_or(InvalidPointRange(p1, p2 + 1))?,
                     );
+                // Distinct font coordinates can scale to the same 26.6 value.
+                // GDI uses the upper reference delta at that shared boundary.
+                let upper_at_collapse = org1 == org2
+                    && orus1 != orus2
+                    && crate::gdi_research::enabled("iup-upper-at-collapse");
+                let is_lower = |a| a < org1 || (a == org1 && !upper_at_collapse);
                 if cur1 == cur2 || orus1 == orus2 {
                     for ((orig, _unscaled), point) in iter {
                         let a = orig.$coord;
-                        point.$coord = if a <= org1 {
+                        point.$coord = if is_lower(a) {
                             a + delta1
                         } else if a >= org2 {
                             a + delta2
@@ -313,7 +319,7 @@ impl<'a> Zone<'a> {
                     let bias_negative = direct && crate::gdi_research::enabled("iup-negative-bias");
                     for ((orig, unscaled), point) in iter {
                         let a = orig.$coord;
-                        point.$coord = if a <= org1 {
+                        point.$coord = if is_lower(a) {
                             a + delta1
                         } else if a >= org2 {
                             a + delta2
