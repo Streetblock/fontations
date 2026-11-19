@@ -107,6 +107,22 @@ stretching answers still apply. Smooth targets keep their existing
 answers, and `GETVARIATION` execution is unchanged. This profile does not
 claim complete GDI rendering equivalence.
 
+`scanctrl-gdi32` selects the measured monochrome dropout policy: without a
+font override, simple dropout including stubs is active through 32 ppem and
+inactive above that size. Each explicit `SCANCTRL` word is evaluated from an
+inactive condition state, so an unmet enabling condition does not retain an
+earlier activation. Fonts may still enable or disable dropout explicitly;
+`SCANTYPE` continues to select the algorithm. Smooth targets and unselected
+builds retain their existing behavior.
+
+The adoption check covered 16,331 natural, 2,579 synthetic and 9,885 variable
+cases against unchanged GDI references. Eight synthetic cases become newly
+pixel-exact, leaving no differing pixels in the natural or synthetic corpus;
+the variable corpus retains its 516 differing pixels. No case regresses and
+no outline or advance changes. Independent native checks also cover 180
+state combinations and 1,071 fixed-outline cases across 153 sizes. Private
+fonts, captures, decompilation and replay artifacts remain outside this repo.
+
 ## Features
 
 - `std` (default): use the standard library. Without it, enable `libm`

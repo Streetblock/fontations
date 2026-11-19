@@ -84,8 +84,11 @@ impl Engine<'_> {
         let p1 = self.graphics.zp1().point(index2)?;
         let p2 = self.graphics.zp2().point(index1)?;
         let vector = line_vector_gdi(
-            p1, p2, is_parallel,
-            self.graphics.target == super::super::Target::Mono && self.program.initial == Program::Glyph,
+            p1,
+            p2,
+            is_parallel,
+            self.graphics.target == super::super::Target::Mono
+                && self.program.initial == Program::Glyph,
         );
         if opcode < 8 {
             self.graphics.proj_vector = vector;
@@ -131,15 +134,21 @@ impl Engine<'_> {
         let p1 = self.graphics.zp1().original(index2)?;
         let p2 = self.graphics.zp2().original(index1)?;
         self.graphics.dual_proj_vector = line_vector_gdi(
-            p1, p2, is_parallel,
-            self.graphics.target == super::super::Target::Mono && self.program.initial == Program::Glyph,
+            p1,
+            p2,
+            is_parallel,
+            self.graphics.target == super::super::Target::Mono
+                && self.program.initial == Program::Glyph,
         );
         // Now set the projection vector from the *current* points.
         let p1 = self.graphics.zp1().point(index2)?;
         let p2 = self.graphics.zp2().point(index1)?;
         self.graphics.proj_vector = line_vector_gdi(
-            p1, p2, is_parallel,
-            self.graphics.target == super::super::Target::Mono && self.program.initial == Program::Glyph,
+            p1,
+            p2,
+            is_parallel,
+            self.graphics.target == super::super::Target::Mono
+                && self.program.initial == Program::Glyph,
         );
         self.graphics.update_projection_state();
         Ok(())
@@ -626,7 +635,16 @@ impl Engine<'_> {
     /// See <https://learn.microsoft.com/en-us/typography/opentype/spec/tt_instructions#scan-conversion-control>
     /// and <https://gitlab.freedesktop.org/freetype/freetype/-/blob/57617782464411201ce7bbc93b086c1b4d7d84a5/src/truetype/ttinterp.c#L4933>
     pub(super) fn op_scanctrl(&mut self) -> OpResult {
+        self.scanctrl_with_profile(crate::gdi_research::enabled("scanctrl-gdi32"))
+    }
+
+    fn scanctrl_with_profile(&mut self, gdi32: bool) -> OpResult {
         let n = self.value_stack.pop()?;
+        // GDI evaluates each new conditional word independently, including
+        // when the previous word or the size-dependent default enabled dropout.
+        if gdi32 && !self.graphics.target.is_smooth() {
+            self.graphics.scan_control = false;
+        }
         // Bits 0-7 represent the threshold value for ppem.
         let threshold = n & 0xFF;
         match threshold {
@@ -851,7 +869,11 @@ fn line_vector_gdi(
     let dx = (p1.x - p2.x).to_bits();
     let dy = (p1.y - p2.y).to_bits();
     if mono_glyph && dx != 0 && dy != 0 && crate::gdi_research::enabled("line-vectors") {
-        let (x, y) = if is_parallel { (dx, dy) } else { (dy.wrapping_neg(), dx) };
+        let (x, y) = if is_parallel {
+            (dx, dy)
+        } else {
+            (dy.wrapping_neg(), dx)
+        };
         if let Some((x, y)) = super::super::research_line_norm::normalize_nonzero_nearest(x, y) {
             return Point::new(x, y);
         }
@@ -1229,5 +1251,49 @@ mod tests {
         engine.graphics.ppem = 12;
         engine.op_scanctrl().unwrap();
         assert!(engine.graphics.scan_control);
+    }
+
+    #[test]
+    fn gdi_scanctrl_replaces_previous_enablement() {
+        let mut mock = MockEngine::new();
+        let mut engine = mock.engine();
+        engine.graphics.target = super::super::super::Target::Mono;
+        engine.graphics.ppem = 32;
+        engine.graphics.scan_type = 4;
+        engine.graphics.scan_control = true;
+        for (word, expected) in [
+            (0x101, false),
+            (0x1ff, true),
+            (0x101, false),
+            (0x140, true),
+            (0, false),
+        ] {
+            engine.value_stack.push(word).unwrap();
+            engine.scanctrl_with_profile(true).unwrap();
+            assert_eq!(engine.graphics.scan_control, expected);
+            assert_eq!(engine.graphics.scan_type, 4);
+        }
+        // An invalid instruction must not change state before its operand exists.
+        engine.graphics.scan_control = true;
+        engine.value_stack.is_pedantic = true;
+        assert!(engine.scanctrl_with_profile(true).is_err());
+        assert!(engine.graphics.scan_control);
+    }
+
+    #[test]
+    fn gdi_scanctrl_preserves_unselected_and_smooth_state() {
+        let mut mock = MockEngine::new();
+        let mut engine = mock.engine();
+        for (target, selected) in [
+            (super::super::super::Target::Mono, false),
+            (super::super::super::Target::default(), true),
+        ] {
+            engine.graphics.target = target;
+            engine.graphics.ppem = 32;
+            engine.graphics.scan_control = true;
+            engine.value_stack.push(0x101).unwrap();
+            engine.scanctrl_with_profile(selected).unwrap();
+            assert!(engine.graphics.scan_control);
+        }
     }
 }

@@ -269,10 +269,22 @@ pub struct RetainedGraphicsState {
 
 impl RetainedGraphicsState {
     pub fn new(scale: i32, ppem: i32, target: Target) -> Self {
+        Self::new_with_scanctrl_profile(
+            scale,
+            ppem,
+            target,
+            crate::gdi_research::enabled("scanctrl-gdi32"),
+        )
+    }
+
+    fn new_with_scanctrl_profile(scale: i32, ppem: i32, target: Target, gdi32: bool) -> Self {
         Self {
             scale,
             ppem,
             target,
+            // The measured GDI mono default includes stubs through 32 ppem.
+            // A font's SCANCTRL and SCANTYPE may override it afterward.
+            scan_control: gdi32 && !target.is_smooth() && ppem <= 32,
             ..Default::default()
         }
     }
@@ -315,5 +327,59 @@ impl Deref for GraphicsState<'_> {
 impl DerefMut for GraphicsState<'_> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.retained
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::outline::SmoothMode;
+
+    #[test]
+    fn gdi_scanctrl_default_stops_after_32_ppem() {
+        for ppem in [1, 13, 31, 32, 33, 42, 100] {
+            let state =
+                RetainedGraphicsState::new_with_scanctrl_profile(0x10000, ppem, Target::Mono, true);
+            assert_eq!(state.scan_control, ppem <= 32);
+            assert_eq!(state.scan_type, 0);
+            assert_eq!(
+                (state.scale, state.ppem, state.target),
+                (0x10000, ppem, Target::Mono)
+            );
+            assert!(
+                !RetainedGraphicsState::new_with_scanctrl_profile(
+                    0x10000,
+                    ppem,
+                    Target::Mono,
+                    false
+                )
+                .scan_control
+            );
+        }
+        assert!(!RetainedGraphicsState::default().scan_control);
+    }
+
+    #[test]
+    fn gdi_scanctrl_default_preserves_smooth_targets() {
+        for mode in [
+            SmoothMode::Normal,
+            SmoothMode::Light,
+            SmoothMode::Lcd,
+            SmoothMode::VerticalLcd,
+        ] {
+            let target = Target::Smooth {
+                mode,
+                preserve_linear_metrics: false,
+                symmetric_rendering: true,
+            };
+            for ppem in [13, 32, 33] {
+                let baseline =
+                    RetainedGraphicsState::new_with_scanctrl_profile(0x10000, ppem, target, false);
+                let selected =
+                    RetainedGraphicsState::new_with_scanctrl_profile(0x10000, ppem, target, true);
+                assert!(!baseline.scan_control && !selected.scan_control);
+                assert_eq!(baseline.scan_type, selected.scan_type);
+            }
+        }
     }
 }
