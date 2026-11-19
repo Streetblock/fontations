@@ -452,6 +452,16 @@ where
     ///
     /// For details on the algorithm, see: <https://learn.microsoft.com/en-us/typography/opentype/spec/gvar#inferred-deltas-for-un-referenced-point-numbers>
     fn interpolate(&mut self, range: Range<usize>, ref1: usize, ref2: usize) {
+        self.interpolate_with_profile(range, ref1, ref2, gdi_inferred_truncate());
+    }
+
+    fn interpolate_with_profile(
+        &mut self,
+        range: Range<usize>,
+        ref1: usize,
+        ref2: usize,
+        gdi_truncate: bool,
+    ) {
         if range.is_empty() {
             return;
         }
@@ -473,7 +483,7 @@ where
                 // If the references share a coordinate but moved apart, the
                 // inferred delta is zero and the coordinate is left alone.
                 if in1 != in2 || out1 == out2 {
-                    let scale = if in1 != in2 {
+                    let scale = if in1 != in2 && !gdi_truncate {
                         (out2 - out1) / (in2 - in1)
                     } else {
                         D::zeroed()
@@ -491,6 +501,16 @@ where
                             coord + d1
                         } else if coord >= in2 {
                             coord + d2
+                        } else if gdi_truncate {
+                            // Infer the delta directly from both anchors. A rounded
+                            // position slope can put an exact integer just below
+                            // its boundary before truncation. GDI truncates the
+                            // inferred delta toward zero in design units.
+                            let left = (in2 - coord).to_f64();
+                            let right = (coord - in1).to_f64();
+                            let span = (in2 - in1).to_f64();
+                            let delta = (d1.to_f64() * left + d2.to_f64() * right) / span;
+                            coord + D::from_i32(delta as i32)
                         } else {
                             out1 + (coord - in1) * scale
                         };
@@ -501,6 +521,24 @@ where
         interp_coord!(x);
         interp_coord!(y);
     }
+}
+
+/// Keep the upstream interpolation unless the caller explicitly selects GDI.
+#[cfg(feature = "std")]
+fn gdi_inferred_truncate() -> bool {
+    use std::sync::OnceLock;
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        std::env::var("SKRIFA_GDI_RESEARCH")
+            .unwrap_or_default()
+            .split(',')
+            .any(|feature| feature == "gvar-inferred-truncate")
+    })
+}
+
+#[cfg(not(feature = "std"))]
+fn gdi_inferred_truncate() -> bool {
+    false
 }
 
 #[cfg(test)]
@@ -585,6 +623,88 @@ mod tests {
                 Fixed::from_f64(260.0 + 10.4999237060547),
                 Fixed::from_f64(700.0 - 57.0)
             )
+        );
+    }
+
+    #[test]
+    fn gdi_inferred_delta_truncates_both_signs_and_axes() {
+        for sign in [-1, 1] {
+            let points = make_points(&[(100, 100), (305, 695), (900, 900)]);
+            let deltas = make_points(&[(-20 * sign, -20 * sign), (0, 0), (20 * sign, 20 * sign)]);
+            let (mut working, flags) = make_working_points_and_flags(&points, &deltas);
+            let mut contour = Contour {
+                points: &points,
+                flags: &flags,
+                out_points: &mut working,
+            };
+            contour.interpolate_with_profile(1..2, 0, 2, true);
+            assert_eq!(
+                working[1],
+                Point::new(305 - 9 * sign, 695 + 9 * sign).map(Fixed::from_i32)
+            );
+            let (mut working, flags) = make_working_points_and_flags(&points, &deltas);
+            let mut contour = Contour {
+                points: &points,
+                flags: &flags,
+                out_points: &mut working,
+            };
+            contour.interpolate_with_profile(1..2, 2, 0, true);
+            assert_eq!(
+                working[1],
+                Point::new(305 - 9 * sign, 695 + 9 * sign).map(Fixed::from_i32)
+            );
+        }
+    }
+
+    #[test]
+    fn gdi_inferred_delta_preserves_exact_integer_before_truncation() {
+        let points = make_points(&[(0, 0), (500, 500), (1000, 1000)]);
+        let deltas = make_points(&[(-10, -10), (0, 0), (30, 30)]);
+        let (mut working, flags) = make_working_points_and_flags(&points, &deltas);
+        let mut contour = Contour {
+            points: &points,
+            flags: &flags,
+            out_points: &mut working,
+        };
+        contour.interpolate_with_profile(1..2, 0, 2, true);
+        assert_eq!(working[1], Point::new(510, 510).map(Fixed::from_i32));
+    }
+
+    #[test]
+    fn gdi_inferred_delta_clamps_and_matches_float_coordinates() {
+        let points = make_points(&[(0, 1000), (100, 100), (305, 695), (900, 900), (1000, 0)]);
+        let deltas = make_points(&[(0, 0), (-20, -20), (0, 0), (20, 20), (0, 0)]);
+        let (mut working, flags) = make_working_points_and_flags(&points, &deltas);
+        let float_points: Vec<_> = points
+            .iter()
+            .map(|point| point.map(|value| value as f32))
+            .collect();
+        let mut floats: Vec<_> = working
+            .iter()
+            .map(|point| point.map(Fixed::to_f32))
+            .collect();
+        for range in [0..1, 2..3, 4..5] {
+            Contour {
+                points: &points,
+                flags: &flags,
+                out_points: &mut working,
+            }
+            .interpolate_with_profile(range.clone(), 1, 3, true);
+            Contour {
+                points: &float_points,
+                flags: &flags,
+                out_points: &mut floats,
+            }
+            .interpolate_with_profile(range, 1, 3, true);
+        }
+        assert_eq!(working[0], Point::new(-20, 1020).map(Fixed::from_i32));
+        assert_eq!(working[4], Point::new(1020, -20).map(Fixed::from_i32));
+        assert_eq!(
+            working
+                .iter()
+                .map(|point| point.map(Fixed::to_f32))
+                .collect::<Vec<_>>(),
+            floats
         );
     }
 

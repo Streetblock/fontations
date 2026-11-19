@@ -123,6 +123,25 @@ no outline or advance changes. Independent native checks also cover 180
 state combinations and 1,071 fixed-outline cases across 153 sizes. Private
 fonts, captures, decompilation and replay artifacts remain outside this repo.
 
+`gvar-inferred-truncate` selects GDI-compatible inference for unreferenced
+points in sparse `gvar` tuples. The `read-fonts` interpolation computes each
+inferred delta directly from the reference deltas, then truncates it toward
+zero in design units before adding the original coordinate. This avoids
+quantizing a position slope before truncation. Explicit deltas, clamping
+outside the reference interval, and single-reference contour shifts retain
+their existing behavior. The switch uses the same process-local environment
+selection and remains disabled in unselected and `no_std` builds. Set the
+selection before the first outline or variation-interpolation call.
+
+Measured independently of the raster correction, this profile reduces the
+9,885-case variable corpus from 212 to 29 differing pixels: 134 cases improve,
+132 become newly pixel-exact, and none regress. Contours improve in 718 cases,
+including 708 newly exact, with no lost exact contours. Advances are unchanged.
+The test fonts and GDI captures are local evidence and are not redistributed.
+All 16,331 natural and 2,579 synthetic cases remain pixel-exact; their native
+contour references also stay exact. Disabling the profile reproduces the
+previous fork's complete glyph records across all three corpora.
+
 ## Features
 
 - `std` (default): use the standard library. Without it, enable `libm`

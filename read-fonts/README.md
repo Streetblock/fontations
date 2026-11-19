@@ -46,6 +46,15 @@ versions, the marker struct has a corresponding field where that length or
 offset is stored. This means that at runtime there is no need to double check a
 version or length.
 
+## Fork compatibility profile
+
+With `std`, this fork recognizes `gvar-inferred-truncate` in the comma-separated
+`SKRIFA_GDI_RESEARCH` environment variable. Set it before the first variation
+interpolation; the choice is cached for the process. Sparse `gvar` tuples then
+infer deltas directly from both references and truncate toward zero in design
+units. Other `gvar` cases retain their existing behavior. The profile is
+disabled by default and in `no_std` builds.
+
 ## records
 
 Unlike tables, which are essentially a set of methods for reading into a byte

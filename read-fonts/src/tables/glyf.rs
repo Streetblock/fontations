@@ -189,6 +189,10 @@ pub trait PointCoord:
     fn from_fixed(x: Fixed) -> Self;
     fn from_i32(x: i32) -> Self;
     fn to_f32(self) -> f32;
+    /// Converts a coordinate without rounding fixed-point values through `f32`.
+    fn to_f64(self) -> f64 {
+        f64::from(self.to_f32())
+    }
     fn midpoint(self, other: Self) -> Self;
 }
 
@@ -801,6 +805,10 @@ impl PointCoord for F26Dot6 {
         self.to_f32()
     }
 
+    fn to_f64(self) -> f64 {
+        f64::from(self.to_bits()) / 64.0
+    }
+
     #[inline]
     fn midpoint(self, other: Self) -> Self {
         // FreeType uses integer division on 26.6 to compute midpoints.
@@ -822,6 +830,10 @@ impl PointCoord for Fixed {
         self.to_f32()
     }
 
+    fn to_f64(self) -> f64 {
+        f64::from(self.to_bits()) / 65536.0
+    }
+
     fn midpoint(self, other: Self) -> Self {
         Self::from_bits(midpoint_i32(self.to_bits(), other.to_bits()))
     }
@@ -838,6 +850,10 @@ impl PointCoord for i32 {
 
     fn to_f32(self) -> f32 {
         self as f32
+    }
+
+    fn to_f64(self) -> f64 {
+        f64::from(self)
     }
 
     fn midpoint(self, other: Self) -> Self {
