@@ -264,10 +264,14 @@ impl HintInstance {
         // More weird scaling. This is due to the fact that CVT values are
         // already in 26.6
         // See <https://gitlab.freedesktop.org/freetype/freetype/-/blob/57617782464411201ce7bbc93b086c1b4d7d84a5/src/truetype/ttobjs.c#L996>
+        let full_scale = scale;
+        let use_full_precision = crate::gdi_research::enabled("cvt-full-precision");
         let scale = Fixed::from_bits(scale >> 6);
         let use_gdi_ties = crate::gdi_research::enabled("cvt-ties");
         for value in &mut self.cvt {
-            *value = if use_gdi_ties {
+            *value = if use_full_precision {
+                scale_cvt_full_precision(*value, full_scale)
+            } else if use_gdi_ties {
                 // Round exact halves toward positive infinity at CVT setup.
                 let product = i64::from(*value) * i64::from(scale.to_bits());
                 ((product + 0x8000) >> 16) as i32
@@ -293,6 +297,13 @@ impl HintInstance {
     }
 }
 
+/// Keep the low six scale bits until after multiplying a 26.6 CVT value.
+/// Exact halves round toward positive infinity, including negative values.
+fn scale_cvt_full_precision(value: i32, scale: i32) -> i32 {
+    let product = i64::from(value) * i64::from(scale);
+    ((product + (1 << 21)) >> 22) as i32
+}
+
 #[cfg(test)]
 impl HintInstance {
     /// Enable instruct control bit 1 which effectively disables hinting.
@@ -306,8 +317,57 @@ impl HintInstance {
 
 #[cfg(test)]
 mod tests {
-    use super::{super::super::Outlines, HintInstance};
+    use super::{super::super::Outlines, scale_cvt_full_precision, HintInstance};
     use read_fonts::{types::F2Dot14, FontRef};
+
+    #[test]
+    fn full_precision_cvt_preserves_low_scale_bits() {
+        // Native geometric controls: 100 ppem, 2250 units/em, both signs.
+        let scale = 186_414;
+        for (units, expected) in [
+            (-1000, -2844),
+            (-471, -1340),
+            (-1, -3),
+            (1, 3),
+            (471, 1340),
+            (1000, 2844),
+        ] {
+            assert_eq!(scale_cvt_full_precision(units * 64, scale), expected);
+        }
+        let legacy = ((i64::from(-471 * 64) * i64::from(scale >> 6) + 0x8000) >> 16) as i32;
+        assert_eq!(legacy, -1339);
+    }
+
+    #[test]
+    fn full_precision_cvt_rounds_fractional_design_units_and_signed_halves() {
+        // At this scale the result is value / 64, including cvar fractions.
+        for (value, expected) in [
+            (-97, -2),
+            (-96, -1),
+            (-95, -1),
+            (-33, -1),
+            (-32, 0),
+            (-31, 0),
+            (31, 0),
+            (32, 1),
+            (33, 1),
+            (95, 1),
+            (96, 2),
+            (97, 2),
+        ] {
+            assert_eq!(scale_cvt_full_precision(value, 0x10000), expected);
+        }
+    }
+
+    #[test]
+    fn full_precision_cvt_matches_reduced_scaling_when_low_bits_are_zero() {
+        for value in [-1_000_000, -30144, -1, 0, 1, 30144, 1_000_000] {
+            for scale in [0, 0x10000, 186_368, 204_800] {
+                let reduced = ((i64::from(value) * i64::from(scale >> 6) + 0x8000) >> 16) as i32;
+                assert_eq!(scale_cvt_full_precision(value, scale), reduced);
+            }
+        }
+    }
 
     #[test]
     fn scaled_cvar_cvt() {

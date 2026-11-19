@@ -142,6 +142,33 @@ All 16,331 natural and 2,579 synthetic cases remain pixel-exact; their native
 contour references also stay exact. Disabling the profile reproduces the
 previous fork's complete glyph records across all three corpora.
 
+`cvt-full-precision` preserves all scale-factor bits when scaling the control
+value table. A signed 64-bit product combines the 26.6 CVT value with the full
+16.16 scale, followed by one 22-bit shift. Exact halves round toward positive
+infinity. This profile includes that rounding rule independently of `cvt-ties`;
+it applies to both static CVTs and CVTs adjusted by `cvar`. It is disabled when
+unselected and in `no_std` builds.
+
+The measured case is a control value of -471 design units at 100 ppem with
+2250 units/em: the reduced-scale path gives -1339 in 26.6 pixels, while the
+full-scale path and GDI give -1340. No font-name or glyph-ID exception is used.
+
+With the renderer at `18c8b25` and its preceding eighteen selections, enabling
+this profile reduces the 9,885-case variable corpus from 23 to 16 differing
+pixels. Four cases become newly pixel-exact, with no regressions or lost exact
+cases. Contours improve in 21 cases, including ten newly exact; no contour
+regresses or loses exactness. Advances are unchanged. The clean fork's complete
+glyph records match the successful local research prototype.
+All 16,331 natural and 2,579 synthetic cases remain pixel-exact, with unchanged
+native contour references. Disabling the new profile reproduces the preceding
+fork's complete glyph records across all three corpora.
+
+All 240 independent geometric controls match GDI in both contours and masks.
+Three unit tests cover low scale bits, fractional design units, signed half
+ties and agreement with reduced scaling when the low scale bits are zero.
+The library passes 519 unit tests and its `no_std` check. Private fonts, corpus
+manifests, raw GDI captures and research instrumentation remain outside Git.
+
 ## Features
 
 - `std` (default): use the standard library. Without it, enable `libm`
