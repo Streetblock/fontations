@@ -22,12 +22,19 @@ impl Engine<'_> {
     /// See <https://learn.microsoft.com/en-us/typography/opentype/spec/tt_instructions#get-information>
     /// and <https://gitlab.freedesktop.org/freetype/freetype/-/blob/57617782464411201ce7bbc93b086c1b4d7d84a5/src/truetype/ttinterp.c#L6689>
     pub(super) fn op_getinfo(&mut self) -> OpResult {
+        self.getinfo_with_profile(crate::gdi_research::enabled("getinfo-gdi42"))
+    }
+
+    fn getinfo_with_profile(&mut self, gdi42: bool) -> OpResult {
         use getinfo::*;
         let selector = self.value_stack.pop()?;
+        // The measured GDI profile is limited to monochrome hinting. Smooth
+        // targets keep their existing version and capability answers.
+        let gdi42 = gdi42 && !self.graphics.target.is_smooth();
         let mut result = 0;
         // Interpreter version (selector bit: 0, result bits: 0-7)
         if (selector & VERSION_SELECTOR_BIT) != 0 {
-            result = 40;
+            result = if gdi42 { 42 } else { 40 };
         }
         // Glyph rotated (selector bit: 1, result bit: 8)
         if (selector & GLYPH_ROTATED_SELECTOR_BIT) != 0 && self.graphics.is_rotated {
@@ -38,8 +45,13 @@ impl Engine<'_> {
             result |= GLYPH_STRETCHED_RESULT_BIT;
         }
         // Font variations (selector bit: 3, result bit: 10)
-        if (selector & FONT_VARIATIONS_SELECTOR_BIT) != 0 && self.axis_count != 0 {
+        // GDI reports interpreter support, including for non-variable fonts.
+        if (selector & FONT_VARIATIONS_SELECTOR_BIT) != 0 && (gdi42 || self.axis_count != 0) {
             result |= FONT_VARIATIONS_RESULT_BIT;
+        }
+        // Vertical phantom points (selector bit: 4, result bit: 11)
+        if gdi42 && (selector & VERTICAL_PHANTOMS_SELECTOR_BIT) != 0 {
+            result |= VERTICAL_PHANTOMS_RESULT_BIT;
         }
         // The following only apply for smooth hinting.
         if self.graphics.target.is_smooth() {
@@ -151,6 +163,10 @@ mod getinfo {
     pub const FONT_VARIATIONS_SELECTOR_BIT: i32 = 1 << 3;
     pub const FONT_VARIATIONS_RESULT_BIT: i32 = 1 << 10;
 
+    // Vertical phantom points (selector bit: 4, result bit: 11)
+    pub const VERTICAL_PHANTOMS_SELECTOR_BIT: i32 = 1 << 4;
+    pub const VERTICAL_PHANTOMS_RESULT_BIT: i32 = 1 << 11;
+
     // Subpixel hinting [cleartype enabled] (selector bit: 6, result bit: 13)
     // (always enabled)
     pub const SUBPIXEL_HINTING_SELECTOR_BIT: i32 = 1 << 6;
@@ -261,6 +277,72 @@ mod tests {
     }
 
     #[test]
+    fn getinfo_gdi42_mono() {
+        let mut mock = MockEngine::new();
+        let mut engine = mock.engine();
+        engine.graphics.target = Target::Mono;
+        // Capabilities belong to the interpreter, not the selected font.
+        for axis_count in [0, 2] {
+            engine.axis_count = axis_count;
+            for (selector, expected) in [
+                (0, 0),
+                (1, 42),
+                (2, 0),
+                (4, 0),
+                (8, 0x400),
+                (16, 0x800),
+                (32, 0),
+                (64, 0),
+                (128, 0),
+                (256, 0),
+                (512, 0),
+                (1024, 0),
+                (2048, 0),
+                (4096, 0),
+                (25, 42 | 0x400 | 0x800),
+                (8191, 42 | 0x400 | 0x800),
+            ] {
+                assert_eq!(engine.getinfo_profile_value(selector, true), expected);
+            }
+        }
+        // Existing glyph characteristics still compose with the new answers.
+        engine.graphics.is_rotated = true;
+        engine.graphics.is_stretched = true;
+        assert_eq!(engine.getinfo_profile_value(8191, true), 42 | 0xf00);
+        assert_eq!(engine.getinfo_profile_value(6, true), 0x300);
+        assert_eq!(engine.getinfo_profile_value(0, true), 0);
+    }
+
+    #[test]
+    fn getinfo_gdi42_preserves_smooth_targets() {
+        let mut mock = MockEngine::new();
+        let mut engine = mock.engine();
+        for axis_count in [0, 2] {
+            engine.axis_count = axis_count;
+            for mode in [
+                SmoothMode::Normal,
+                SmoothMode::Light,
+                SmoothMode::Lcd,
+                SmoothMode::VerticalLcd,
+            ] {
+                for preserve_linear_metrics in [false, true] {
+                    for symmetric_rendering in [false, true] {
+                        engine.graphics.target = Target::Smooth {
+                            mode,
+                            preserve_linear_metrics,
+                            symmetric_rendering,
+                        };
+                        for selector in [0, 1, 8, 16, 25, 8191] {
+                            let unchanged = engine.getinfo_profile_value(selector, false);
+                            assert_eq!(engine.getinfo_profile_value(selector, true), unchanged);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn getvariation() {
         let mut mock = MockEngine::new();
         let mut engine = mock.engine();
@@ -314,6 +396,12 @@ mod tests {
     }
 
     impl Engine<'_> {
+        fn getinfo_profile_value(&mut self, selector: i32, gdi42: bool) -> i32 {
+            self.value_stack.push(selector).unwrap();
+            self.getinfo_with_profile(gdi42).unwrap();
+            self.value_stack.pop().unwrap()
+        }
+
         fn getinfo_test(&mut self, selector: i32, expected: i32) {
             self.value_stack.push(selector).unwrap();
             self.op_getinfo().unwrap();

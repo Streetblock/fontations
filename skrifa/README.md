@@ -92,6 +92,21 @@ Each hints for a target: monochrome, grayscale, light grayscale, or
 horizontal or vertical subpixel. A TrueType font that needs its
 instructions to draw correct contours always runs them.
 
+## Fork compatibility switches
+
+This fork provides process-local compatibility experiments through the
+comma-separated `SKRIFA_GDI_RESEARCH` environment variable. Set it before
+the first interpreter call; the selection is cached for the process.
+Experiments are disabled when unselected, and in `no_std` builds.
+
+`getinfo-gdi42` selects the measured GDI monochrome `GETINFO` profile:
+version 42, font-variation support (selector `0x8`, result `0x400`), and
+vertical phantom-point support (selector `0x10`, result `0x800`). Support
+is reported for both static and variable fonts. Existing rotation and
+stretching answers still apply. Smooth targets keep their existing
+answers, and `GETVARIATION` execution is unchanged. This profile does not
+claim complete GDI rendering equivalence.
+
 ## Features
 
 - `std` (default): use the standard library. Without it, enable `libm`
