@@ -55,6 +55,12 @@ infer deltas directly from both references and truncate toward zero in design
 units. Other `gvar` cases retain their existing behavior. The profile is
 disabled by default and in `no_std` builds.
 
+`gvar-scale-single-round` uses the original size-to-units-per-em ratio when
+scaling varied outline points. It rounds only the final 26.6 coordinate, with
+exact halves toward positive infinity. Set the selector before the first varied
+outline load. The selector is opt-in under `std` and preserves phantom point
+scaling.
+
 ## records
 
 Unlike tables, which are essentially a set of methods for reading into a byte

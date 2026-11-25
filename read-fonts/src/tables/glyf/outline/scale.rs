@@ -180,6 +180,8 @@ pub struct SimplePass<'a, 'v, S: Scale> {
 pub struct Scale26Dot6 {
     scale: Fixed,
     is_scaled: bool,
+    ppem_26_6: i32,
+    units_per_em: u16,
 }
 
 impl Scale26Dot6 {
@@ -189,16 +191,20 @@ impl Scale26Dot6 {
     pub fn new(ppem: Option<f32>, units_per_em: u16) -> Self {
         if let Some(ppem) = ppem {
             if units_per_em > 0 {
+                let ppem_26_6 = (ppem * 64.) as i32;
                 return Self {
-                    scale: Fixed::from_bits((ppem * 64.) as i32)
-                        / Fixed::from_bits(units_per_em as i32),
+                    scale: Fixed::from_bits(ppem_26_6) / Fixed::from_bits(units_per_em as i32),
                     is_scaled: true,
+                    ppem_26_6,
+                    units_per_em,
                 };
             }
         }
         Self {
             scale: Fixed::from_bits(0x10000),
             is_scaled: false,
+            ppem_26_6: 0,
+            units_per_em: 0,
         }
     }
 
@@ -231,6 +237,43 @@ impl Scale26Dot6 {
             self.mul_point((font_units.map(F26Dot6::from_i32) + delta).map(|v| v.to_bits()));
         scaled.map(|v| F26Dot6::from_bits(v.to_i32()))
     }
+
+    /// Scale real outline points with the original size ratio and round only
+    /// the final 26.6 coordinate. Exact halves round toward positive infinity.
+    fn mul_varied_outline_point(
+        &self,
+        font_units: Point<i32>,
+        delta: Point<F26Dot6>,
+    ) -> Point<F26Dot6> {
+        let denominator = i64::from(self.units_per_em) * 64;
+        let varied = font_units.map(F26Dot6::from_i32) + delta;
+        let scale_coord = |value: F26Dot6| {
+            let product = i64::from(value.to_bits()) * i64::from(self.ppem_26_6);
+            let raw = (product + denominator / 2).div_euclid(denominator);
+            i32::try_from(raw).ok().map(F26Dot6::from_bits)
+        };
+        match (scale_coord(varied.x), scale_coord(varied.y)) {
+            (Some(x), Some(y)) => Point::new(x, y),
+            _ => self.mul_point_with_delta(font_units, delta),
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+fn gdi_scale_varied_points_once() -> bool {
+    use std::sync::OnceLock;
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        std::env::var("SKRIFA_GDI_RESEARCH")
+            .unwrap_or_default()
+            .split(',')
+            .any(|feature| feature == "gvar-scale-single-round")
+    })
+}
+
+#[cfg(not(feature = "std"))]
+fn gdi_scale_varied_points_once() -> bool {
+    false
 }
 
 impl Scale for Scale26Dot6 {
@@ -321,12 +364,19 @@ impl Scale for Scale26Dot6 {
             );
         if self.is_scaled {
             if have_deltas {
-                for ((point, unscaled), delta) in scaled
+                let scale_varied_points_once = gdi_scale_varied_points_once();
+                for (index, ((point, unscaled), delta)) in scaled
                     .iter_mut()
                     .zip(unscaled.iter())
                     .zip(deltas.deltas.iter())
+                    .enumerate()
                 {
-                    *point = self.mul_point_with_delta(*unscaled, delta.map(Fixed::to_f26dot6));
+                    let delta = delta.map(Fixed::to_f26dot6);
+                    *point = if scale_varied_points_once && index < phantom_start {
+                        self.mul_varied_outline_point(*unscaled, delta)
+                    } else {
+                        self.mul_point_with_delta(*unscaled, delta)
+                    };
                 }
                 // FreeType applies different rounding to HVAR deltas. Since we
                 // only use gvar, mimic that for phantom point deltas when an
@@ -836,6 +886,22 @@ mod tests {
     use crate::tables::loca::LocaGlyph;
     use crate::{tables::glyf::Glyph, types::GlyphId, FontRef};
     use alloc::{vec, vec::Vec};
+
+    #[test]
+    fn varied_outline_scaling_rounds_the_exact_ratio_once() {
+        let zero = Point::new(F26Dot6::ZERO, F26Dot6::ZERO);
+        let at_42 = Scale26Dot6::new(Some(42.0), 2250);
+        let points = at_42.mul_varied_outline_point(Point::new(244, 619), zero);
+        assert_eq!((points.x.to_bits(), points.y.to_bits()), (291, 739));
+
+        let at_100 = Scale26Dot6::new(Some(100.0), 2250);
+        let points = at_100.mul_varied_outline_point(Point::new(1829, -1829), zero);
+        assert_eq!((points.x.to_bits(), points.y.to_bits()), (5202, -5202));
+
+        let at_16 = Scale26Dot6::new(Some(16.0), 2048);
+        let points = at_16.mul_varied_outline_point(Point::new(3, -3), zero);
+        assert_eq!((points.x.to_bits(), points.y.to_bits()), (2, -1));
+    }
 
     /// At no size [`Scale26Dot6`] returns font units shifted left by six.
     #[test]
